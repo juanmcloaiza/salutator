@@ -8,6 +8,7 @@ from . import humans
 from . import animals
 from . import plants
 from . import minerals
+from . import eso
 
 
 #  Version info (__version__)
