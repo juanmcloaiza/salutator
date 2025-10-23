@@ -1,7 +1,10 @@
 # salutator/__init__.py
+"""
+Salutator — a package for greetings and goodbyes
+across humans, animals, plants, and minerals.
+"""
 
-from .greetings import Greeter
-from .goodbyes import GoodByer
+__version__ = "0.1.0"
 
-__all__ = ['Greeter', 'GoodByer']
+__all__ = ['humans', 'animals', 'plants', 'minerals']
 
