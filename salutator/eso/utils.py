@@ -194,3 +194,4 @@ def _build_adql_string(user_params: _UserParams) -> str:
         query_string = "select " + query_string
 
     return query_string.strip()
+

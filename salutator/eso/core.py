@@ -6,6 +6,11 @@ ESO Archive Module
 European Southern Observatory (ESO)
 """
 
+import os
+from openai import OpenAI
+from openai import RateLimitError
+from typing import Optional
+
 import base64
 import email
 import functools
@@ -285,6 +290,34 @@ class EsoClass(QueryWithLogin):
             tap_service = TAPService(self._tap_url())
 
         return tap_service
+
+    def quick_question(self, llm_prompt: str) -> str: # Tuple[str, Table]:
+        """
+        Parameters
+        ----------
+        llm_prompt: str
+            The prompt for the LLM model.
+        Input: natural language prompt
+
+        Returns
+        -------
+        query_str : str
+            An ADQL query string ready to be executed by an astropy TAP service.
+        table: astropy.table.Table
+        """
+        # openai.
+        client = OpenAI()
+        try:
+            response = client.responses.create(
+                model="gpt-5",
+                input=f"{llm_prompt}"
+            )
+            query = "" # Extract query from response
+        except RateLimitError:
+            print("No more credit available; returning a default query")
+            query = "select * from ivoa.ObsCore"
+        table = self.query_tap(query)
+        return query, table
 
     def query_tap(self,
                   query: str, *,
@@ -1051,3 +1084,4 @@ class EsoClass(QueryWithLogin):
 
 
 Eso = EsoClass()
+

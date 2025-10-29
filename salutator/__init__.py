@@ -18,5 +18,5 @@ except ImportError:
     __version__ = "0.0.0"
 
 
-__all__ = ['humans', 'animals', 'plants', 'minerals']
+__all__ = ['humans', 'animals', 'plants', 'minerals', 'eso']
 
