@@ -7,17 +7,12 @@ European Southern Observatory (ESO)
 """
 
 import os
-from openai import OpenAI
-from openai import RateLimitError
-from typing import Optional
+import sys
 
 import base64
 import email
 import functools
 import json
-import os
-import os.path
-import sys
 import re
 import shutil
 import subprocess
@@ -25,6 +20,9 @@ import time
 import warnings
 import xml.etree.ElementTree as ET
 from typing import List, Optional, Tuple, Dict, Set, Union
+
+from openai import OpenAI
+from openai import RateLimitError
 
 import astropy.utils.data
 import keyring
@@ -36,13 +34,15 @@ from pyvo.dal import TAPService
 from pyvo.dal.exceptions import DALQueryError, DALFormatError
 
 from astroquery import log
-from . import conf
 from astroquery.exceptions import RemoteServiceError, LoginError, \
     NoResultsWarning, MaxResultsWarning
 from astroquery.query import QueryWithLogin
 from astroquery.utils import schema
+
+from . import conf
 from .utils import _UserParams, raise_if_coords_not_valid, _reorder_columns, \
     _raise_if_has_deprecated_keys, _build_adql_string, \
+    _get_text_from_llm_response, \
     DEFAULT_LEAD_COLS_PHASE3, DEFAULT_LEAD_COLS_RAW
 
 
@@ -94,12 +94,12 @@ def unlimited_maxrec(func):
         if not isinstance(self, EsoClass):
             raise ValueError(f"Expecting EsoClass, found {type(self)}")
 
-        tmpvar = self.ROW_LIMIT
+        tmpvar = self.row_limit
         try:
-            self.ROW_LIMIT = sys.maxsize
+            self.row_limit = sys.maxsize
             result = func(self, *args, **kwargs)
         finally:
-            self.ROW_LIMIT = tmpvar
+            self.row_limit = tmpvar
         return result
     return wrapper
 
@@ -118,31 +118,32 @@ class EsoClass(QueryWithLogin):
         super().__init__()
         self._auth_info: Optional[_AuthInfo] = None
         self._hash = None
-        self._ROW_LIMIT = None
-        self.ROW_LIMIT = conf.ROW_LIMIT
+        self._row_limit = None
+        self.row_limit = conf.ROW_LIMIT
 
     @property
-    def ROW_LIMIT(self):
+    def row_limit(self):
         """
         Getter.
         Safeguard that truncates the number of records returned by a query
         """
-        return self._ROW_LIMIT
+        return self._row_limit
 
-    @ROW_LIMIT.setter
-    def ROW_LIMIT(self, value):
-        mr = self._ROW_LIMIT
+    @row_limit.setter
+    def row_limit(self, value):
+        mr = self._row_limit
 
         # type check
         if not (value is None or isinstance(value, int)):
-            raise TypeError(f"ROW_LIMIT attribute must be of type int or None; found {type(value)}")
+            raise TypeError(
+                f"ROW_LIMIT attribute must be of type int or None; found {type(value)}")
 
         if value is None or value < 1:
             mr = sys.maxsize
         else:
             mr = value
 
-        self._ROW_LIMIT = mr
+        self._row_limit = mr
 
     def _tap_url(self) -> str:
         url = conf.tap_url
@@ -237,7 +238,7 @@ class EsoClass(QueryWithLogin):
             warnings.warn("Query returned no results", NoResultsWarning)
 
         if len(table_rowlim_plus_one) == row_limit_plus_one:
-            warnings.warn(f"Results truncated to {self.ROW_LIMIT}. "
+            warnings.warn(f"Results truncated to {self.row_limit}. "
                           "To retrieve all the records set to None the ROW_LIMIT attribute",
                           MaxResultsWarning)
 
@@ -254,22 +255,28 @@ class EsoClass(QueryWithLogin):
                     f' >>> Eso().query_tap( "{query_str}" )\n\n')
 
         try:
-            row_limit_plus_one = self.ROW_LIMIT
-            if self.ROW_LIMIT < sys.maxsize:
-                row_limit_plus_one = self.ROW_LIMIT + 1
+            row_limit_plus_one = self.row_limit
+            if self.row_limit < sys.maxsize:
+                row_limit_plus_one = self.row_limit + 1
 
-            table_with_an_extra_row = tap.search(query=query_str, maxrec=row_limit_plus_one).to_table()
-            self._maybe_warn_about_table_length(table_with_an_extra_row, row_limit_plus_one)
+            table_with_an_extra_row = tap.search(
+                query=query_str, maxrec=row_limit_plus_one).to_table()
+            self._maybe_warn_about_table_length(
+                table_with_an_extra_row, row_limit_plus_one)
         except DALQueryError:
             log.error(message(query_str))
         except DALFormatError as e:
-            raise DALFormatError(message(query_str) + f"cause: {e.cause}") from e
+            raise DALFormatError(message(query_str) +
+                                 f"cause: {e.cause}") from e
         except Exception as e:
             raise type(e)(f"{e}\n" + message(query_str)) from e
 
-        return table_with_an_extra_row[:self.ROW_LIMIT]
+        return table_with_an_extra_row[:self.row_limit]
 
     def tap(self, authenticated: bool = False) -> TAPService:
+        """
+        Creates and returns the ESO TAPService.
+        """
 
         if authenticated and not self.authenticated():
             raise LoginError(
@@ -291,7 +298,7 @@ class EsoClass(QueryWithLogin):
 
         return tap_service
 
-    def quick_question(self, llm_prompt: str) -> str: # Tuple[str, Table]:
+    def quick_question(self, llm_prompt: str) -> str:  # Tuple[str, Table]:
         """
         Parameters
         ----------
@@ -305,14 +312,13 @@ class EsoClass(QueryWithLogin):
             An ADQL query string ready to be executed by an astropy TAP service.
         table: astropy.table.Table
         """
-        # openai.
         client = OpenAI()
         try:
             response = client.responses.create(
                 model="gpt-5",
                 input=f"{llm_prompt}"
             )
-            query = "" # Extract query from response
+            query = _get_text_from_llm_response(response)
         except RateLimitError:
             print("No more credit available; returning a default query")
             query = "select * from ivoa.ObsCore"
@@ -430,14 +436,16 @@ class EsoClass(QueryWithLogin):
 
         _raise_if_has_deprecated_keys(user_params.column_filters)
 
-        raise_if_coords_not_valid(user_params.cone_ra, user_params.cone_dec, user_params.cone_radius)
+        raise_if_coords_not_valid(
+            user_params.cone_ra, user_params.cone_dec, user_params.cone_radius)
 
         query = _build_adql_string(user_params)
 
         if user_params.get_query_payload:
             return query
 
-        ret_table = self.query_tap(query=query, authenticated=user_params.authenticated)
+        ret_table = self.query_tap(
+            query=query, authenticated=user_params.authenticated)
         return list(ret_table[0].values())[0] if user_params.count_only else ret_table
 
     @deprecated_renamed_argument(('open_form', 'cache'), (None, None),
@@ -451,7 +459,7 @@ class EsoClass(QueryWithLogin):
             top: int = None,
             count_only: bool = False,
             get_query_payload: bool = False,
-            help: bool = False,
+            print_help: bool = False,
             authenticated: bool = False,
             open_form: bool = False, cache: bool = False,
     ) -> Union[Table, int, str]:
@@ -523,7 +531,7 @@ class EsoClass(QueryWithLogin):
                                   top=top,
                                   count_only=count_only,
                                   get_query_payload=get_query_payload,
-                                  print_help=help,
+                                  print_help=print_help,
                                   authenticated=authenticated,
                                   )
         t = self._query_on_allowed_values(user_params=user_params)
@@ -541,7 +549,7 @@ class EsoClass(QueryWithLogin):
             top: int = None,
             count_only: bool = False,
             get_query_payload: bool = False,
-            help: bool = False,
+            print_help: bool = False,
             authenticated: bool = False,
             open_form: bool = False, cache: bool = False,
     ) -> Union[Table, int, str]:
@@ -613,7 +621,7 @@ class EsoClass(QueryWithLogin):
                                   top=top,
                                   count_only=count_only,
                                   get_query_payload=get_query_payload,
-                                  print_help=help,
+                                  print_help=print_help,
                                   authenticated=authenticated,
                                   )
         t = self._query_on_allowed_values(user_params)
@@ -631,7 +639,7 @@ class EsoClass(QueryWithLogin):
             top: int = None,
             count_only: bool = False,
             get_query_payload: bool = False,
-            help: bool = False,
+            print_help: bool = False,
             authenticated: bool = False,
             open_form: bool = False, cache: bool = False,
     ) -> Union[Table, int, str]:
@@ -701,7 +709,7 @@ class EsoClass(QueryWithLogin):
                                   top=top,
                                   count_only=count_only,
                                   get_query_payload=get_query_payload,
-                                  print_help=help,
+                                  print_help=print_help,
                                   authenticated=authenticated)
         t = self._query_on_allowed_values(user_params)
         t = _reorder_columns(t, DEFAULT_LEAD_COLS_RAW)
@@ -786,7 +794,8 @@ class EsoClass(QueryWithLogin):
         content_disposition = response.headers.get("Content-Disposition", "")
         filename = re.findall(r"filename=(\S+)", content_disposition)
         if not filename:
-            raise RemoteServiceError(f"Unable to find filename for {response.url}")
+            raise RemoteServiceError(
+                f"Unable to find filename for {response.url}")
         return os.path.basename(filename[0].replace('"', ''))
 
     @staticmethod
@@ -812,7 +821,8 @@ class EsoClass(QueryWithLogin):
             if os.path.exists(part_filename):
                 log.info(f"Removing partially downloaded file {part_filename}")
                 os.remove(part_filename)
-            download_required = overwrite or not self._find_cached_file(filename)
+            download_required = overwrite or not self._find_cached_file(
+                filename)
             if download_required:
                 with open(part_filename, 'wb') as fd:
                     for chunk in response.iter_content(chunk_size=block_size):
@@ -830,12 +840,15 @@ class EsoClass(QueryWithLogin):
         downloaded_files = []
         for i, file_id in enumerate(file_ids, 1):
             file_link = self.DOWNLOAD_URL + file_id
-            log.info(f"Downloading file {i}/{nfiles} {file_link} to {destination}")
+            log.info(
+                f"Downloading file {i}/{nfiles} {file_link} to {destination}")
             try:
-                filename, downloaded = self._download_eso_file(file_link, destination, overwrite)
+                filename, downloaded = self._download_eso_file(
+                    file_link, destination, overwrite)
                 downloaded_files.append(filename)
                 if downloaded:
-                    log.info(f"Successfully downloaded dataset {file_id} to {filename}")
+                    log.info(
+                        f"Successfully downloaded dataset {file_id} to {filename}")
             except requests.HTTPError as http_error:
                 if http_error.response.status_code == 401:
                     log.error(f"Access denied to {file_link}")
@@ -918,7 +931,8 @@ class EsoClass(QueryWithLogin):
         if 'application/xml' in content_type:
             filename = self._get_filename_from_response(response)
             xml = response.content
-            associated_files.update(self._get_unique_files_from_association_tree(xml))
+            associated_files.update(
+                self._get_unique_files_from_association_tree(xml))
             if savexml:
                 self._save_xml(xml, filename, destination)
         # For multiple datasets it returns a multipart message
@@ -928,11 +942,13 @@ class EsoClass(QueryWithLogin):
             for part in msg.get_payload():
                 filename = part.get_filename()
                 xml = part.get_payload(decode=True)
-                associated_files.update(self._get_unique_files_from_association_tree(xml))
+                associated_files.update(
+                    self._get_unique_files_from_association_tree(xml))
                 if savexml:
                     self._save_xml(xml, filename, destination)
         else:
-            raise CalSelectorError(f"Unexpected content-type '{content_type}' for {response.url}")
+            raise CalSelectorError(
+                f"Unexpected content-type '{content_type}' for {response.url}")
 
         # remove input datasets from calselector results
         return list(associated_files.difference(set(datasets)))
@@ -986,7 +1002,8 @@ class EsoClass(QueryWithLogin):
 
         associated_files = []
         if with_calib:
-            log.info(f"Retrieving associated '{with_calib}' calibration files ...")
+            log.info(
+                f"Retrieving associated '{with_calib}' calibration files ...")
             try:
                 # batch calselector requests to avoid possible issues on the ESO server
                 batch_size = 100
@@ -1001,7 +1018,8 @@ class EsoClass(QueryWithLogin):
 
         all_datasets = datasets + associated_files
         log.info("Downloading datasets ...")
-        files = self._download_eso_files(all_datasets, destination, continuation)
+        files = self._download_eso_files(
+            all_datasets, destination, continuation)
         if unzip:
             files = self._unzip_files(files)
         log.info("Done!")
@@ -1016,7 +1034,7 @@ class EsoClass(QueryWithLogin):
                               top: int = None,
                               count_only: bool = False,
                               get_query_payload: bool = False,
-                              help: bool = False,
+                              print_help: bool = False,
                               authenticated: bool = False,
                               open_form: bool = False, cache: bool = False,
                               ) -> Union[Table, int, str]:
@@ -1078,10 +1096,9 @@ class EsoClass(QueryWithLogin):
                                   top=top,
                                   count_only=count_only,
                                   get_query_payload=get_query_payload,
-                                  print_help=help,
+                                  print_help=print_help,
                                   authenticated=authenticated)
         return self._query_on_allowed_values(user_params)
 
 
 Eso = EsoClass()
-

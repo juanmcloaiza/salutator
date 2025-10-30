@@ -185,7 +185,8 @@ def _build_adql_string(user_params: _UserParams) -> str:
         query_string += where_string
 
     if len(user_params.order_by) > 0 and not user_params.count_only:
-        order_string = ' order by ' + user_params.order_by + (' desc ' if user_params.order_by_desc else ' asc ')
+        order_string = ' order by ' + user_params.order_by + (
+            ' desc ' if user_params.order_by_desc else ' asc ')
         query_string += order_string
 
     if user_params.top is not None:
@@ -195,3 +196,18 @@ def _build_adql_string(user_params: _UserParams) -> str:
 
     return query_string.strip()
 
+
+def _get_text_from_llm_response(response) -> str:
+    """
+    Extracts all text content from an OpenAI Responses API response object.
+
+    Handles multi-part or mixed outputs safely.
+    Returns a single concatenated string.
+    """
+    texts = []
+    if hasattr(response, "output"):
+        for item in response.output:
+            for content_part in getattr(item, "content", []):
+                if getattr(content_part, "type", None) == "output_text":
+                    texts.append(content_part.text)
+    return "".join(texts)

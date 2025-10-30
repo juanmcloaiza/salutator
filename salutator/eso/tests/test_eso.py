@@ -324,27 +324,27 @@ def test_maxrec():
     eso_instance = Eso()
 
     # EXPECTED_MAXREC is the default value in the conf
-    maxrec = eso_instance.ROW_LIMIT
+    maxrec = eso_instance.row_limit
     assert maxrec == EXPECTED_MAXREC
 
     # we change it to 5
-    eso_instance.ROW_LIMIT = 5
-    maxrec = eso_instance.ROW_LIMIT
+    eso_instance.row_limit = 5
+    maxrec = eso_instance.row_limit
     assert maxrec == 5
 
     # change it to no-truncation
-    eso_instance.ROW_LIMIT = None
-    maxrec = eso_instance.ROW_LIMIT
+    eso_instance.row_limit = None
+    maxrec = eso_instance.row_limit
     assert maxrec == sys.maxsize
 
     # no truncation
-    eso_instance.ROW_LIMIT = 0
-    maxrec = eso_instance.ROW_LIMIT
+    eso_instance.row_limit = 0
+    maxrec = eso_instance.row_limit
     assert maxrec == sys.maxsize
 
     # no truncation
-    eso_instance.ROW_LIMIT = -1
-    maxrec = eso_instance.ROW_LIMIT
+    eso_instance.row_limit = -1
+    maxrec = eso_instance.row_limit
     assert maxrec == sys.maxsize
 
 
