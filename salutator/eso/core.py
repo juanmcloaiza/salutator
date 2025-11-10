@@ -23,6 +23,7 @@ from typing import List, Optional, Tuple, Dict, Set, Union
 
 from openai import OpenAI
 from openai import RateLimitError
+import pandas as pd
 
 import astropy.utils.data
 import keyring
@@ -120,6 +121,13 @@ class EsoClass(QueryWithLogin):
         self._hash = None
         self._row_limit = None
         self.row_limit = conf.ROW_LIMIT
+
+## Import tables
+        from .tables.obs_core import ObsCoreTable
+        # TODO
+        # this should be a getter. Not modifiable by user
+        self.observations = ObsCoreTable()
+##
 
     @property
     def row_limit(self):
@@ -1100,5 +1108,9 @@ class EsoClass(QueryWithLogin):
                                   authenticated=authenticated)
         return self._query_on_allowed_values(user_params)
 
+
+###
+
+###
 
 Eso = EsoClass()
