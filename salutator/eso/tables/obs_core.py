@@ -77,19 +77,19 @@ class ObsCoreColumn(EsoColumn):
         return (self._series < other)
 
     def __le__(self, other):
-        return(self._series <= other)
+        return (self._series <= other)
 
     def __gt__(self, other):
-        return(self._series > other)
+        return (self._series > other)
 
     def __ge__(self, other):
-        return(len(self._series) >= len(other))
+        return (len(self._series) >= len(other))
 
     def __eq__(self, other):
         return (len(self._series) == len(other))
 
     def __ne__(self, other):
-        return not(self.__eq__(other))
+        return not (self.__eq__(other))
 
 
 class ObsCoreTable(EsoTable):
