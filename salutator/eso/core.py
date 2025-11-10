@@ -122,10 +122,12 @@ class EsoClass(QueryWithLogin):
         self._row_limit = None
         self.row_limit = conf.ROW_LIMIT
 
-        from .tables.obs_core import ObsCore
+## Import tables
+        from .tables.obs_core import ObsCoreTable
         # TODO
         # this should be a getter. Not modifiable by user
-        self.observations = ObsCore(pd.read_csv("./select_all_obscore.csv"))
+        self.observations = ObsCoreTable()
+##
 
     @property
     def row_limit(self):

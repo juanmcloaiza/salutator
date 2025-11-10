@@ -1,6 +1,3 @@
-from dataclasses import dataclass
-
-
 # my_observations = eso_archive.observations
 # my_observations.colnames  # prints colnames
 # my_observations = my_observations[[“target_name”, “s_ra”, “s_dec”]]  # select cols
@@ -12,6 +9,11 @@ from dataclasses import dataclass
 # my_observations.pprint() 
 
 
+# abstract class
+class EsoColumn():
+    pass
+
+
 class EsoTable():
-    def __getitem__(self, col_name):
-        return 
+    pass
+
