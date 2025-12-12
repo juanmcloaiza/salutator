@@ -31,7 +31,7 @@ class EsoIndexer():  # to return stuff
         if top > self._top:
             self._top = top
             self._data = TAPService(TAP_URL).search(
-                query=(f"select top {self._top} {", ".join(self.required_columns)} "
+                query=(f"select top {self._top} {', '.join(self.required_columns)} "
                        f"from {self.table_name} order by {self.required_columns[0]}"),
                 maxrec=sys.maxsize,
             ).to_table().to_pandas()
